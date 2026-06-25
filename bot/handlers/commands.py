@@ -72,7 +72,7 @@ async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     assert update.effective_chat and update.effective_user and update.effective_message
 
     async with async_session_factory() as session:
-        await ensure_group_user(session, update.effective_chat, update.effective_user)
+        group, user, _ = await ensure_group_user(session, update.effective_chat, update.effective_user)
         await session.commit()
 
     matches = await _get_upcoming_matches()
@@ -90,19 +90,42 @@ async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.effective_message.reply_html(NO_UPCOMING_MATCHES)
         return
 
-    await update.effective_message.reply_html(CHOOSE_MATCH, reply_markup=matches_keyboard(matches))
+    predicted_match_ids = await _get_predicted_match_ids(group.id, user.id, [m.id for m in matches])
+
+    await update.effective_message.reply_html(
+        CHOOSE_MATCH,
+        reply_markup=matches_keyboard(matches, predicted_match_ids),
+    )
 
 
 async def _get_upcoming_matches() -> list[Match]:
     async with async_session_factory() as session:
-        return (
+        return list(
+            (
+                await session.execute(
+                    select(Match)
+                    .where(Match.status.in_(UPCOMING_STATUSES))
+                    .order_by(Match.kickoff_at.asc())
+                    .limit(settings.upcoming_matches_limit)
+                )
+            ).scalars().all()
+        )
+
+
+async def _get_predicted_match_ids(group_id: int, user_id: int, match_ids: list[int]) -> set[int]:
+    if not match_ids:
+        return set()
+    async with async_session_factory() as session:
+        rows = (
             await session.execute(
-                select(Match)
-                .where(Match.status.in_(UPCOMING_STATUSES))
-                .order_by(Match.kickoff_at.asc())
-                .limit(settings.upcoming_matches_limit)
+                select(Prediction.match_id).where(
+                    Prediction.group_id == group_id,
+                    Prediction.user_id == user_id,
+                    Prediction.match_id.in_(match_ids),
+                )
             )
         ).scalars().all()
+        return set(rows)
 
 
 async def matchreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -120,6 +143,7 @@ async def matchreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 .limit(5)
             )
         ).scalars().all()
+        matches = list(matches)
         await session.commit()
 
     if not matches:

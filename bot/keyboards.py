@@ -6,11 +6,13 @@ from bot.messages_fa import fa_digits, format_dt
 from database.models import Match
 
 
-def matches_keyboard(matches: list[Match]) -> InlineKeyboardMarkup: 
-    rows: list[list[InlineKeyboardButton]] = [] 
-    for match in matches: 
-        text = f"⚽️ {match.home_team} - {match.away_team} | {format_dt(match.kickoff_at)}" 
-        rows.append([InlineKeyboardButton(text=text, callback_data=f"match:{match.id}")]) 
+def matches_keyboard(matches: list[Match], predicted_match_ids: set[int] | None = None) -> InlineKeyboardMarkup:
+    predicted_match_ids = predicted_match_ids or set()
+    rows: list[list[InlineKeyboardButton]] = []
+    for match in matches:
+        mark = "✅" if match.id in predicted_match_ids else "🔮"
+        text = f"{mark} {match.home_team} - {match.away_team} | {format_dt(match.kickoff_at)}"
+        rows.append([InlineKeyboardButton(text=text, callback_data=f"match:{match.id}")])
     return InlineKeyboardMarkup(rows)
 
 
